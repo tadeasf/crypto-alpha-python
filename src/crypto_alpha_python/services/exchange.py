@@ -2,7 +2,7 @@
 Exchange service for handling exchange connections and data fetching.
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Optional, Set
 import websockets
 from binance.spot import Spot
@@ -267,7 +267,7 @@ class ExchangeService:
                                 timestamp_str = msg.get("timestamp")
                                 if not timestamp_str:
                                     logger.warning("No timestamp in Coinbase message, using current time")
-                                    timestamp = datetime.utcnow()
+                                    timestamp = datetime.now(UTC)
                                 else:
                                     # Convert ISO format timestamp to datetime
                                     timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
@@ -371,22 +371,44 @@ class ExchangeService:
             # Get product ticker using Advanced Trade API
             ticker = self.coinbase_client.get_product(product_id)
             
+            # Get best bid/ask separately since it's not in the product response
+            best_bid_ask = self.coinbase_client.get_best_bid_ask(product_ids=[product_id])
+            
+            # Handle timestamp
+            timestamp_str = ticker.time if hasattr(ticker, 'time') else None
+            if not timestamp_str:
+                logger.warning("No timestamp in Coinbase ticker data, using current time")
+                timestamp = datetime.now(UTC)
+            else:
+                # Convert ISO format timestamp to datetime
+                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            
+            # Get best bid/ask from the response
+            # Find the pricebook for our product
+            pricebook = next((pb for pb in best_bid_ask.pricebooks if pb.product_id == product_id), None)
+            
+            # Get best bid/ask from the pricebook
+            best_bid = pricebook.bids[0].price if pricebook and pricebook.bids else 0
+            best_ask = pricebook.asks[0].price if pricebook and pricebook.asks else 0
+            best_bid_size = pricebook.bids[0].size if pricebook and pricebook.bids else 0
+            best_ask_size = pricebook.asks[0].size if pricebook and pricebook.asks else 0
+            
             return MarketData(
-                timestamp=datetime.fromisoformat(ticker["time"].replace("Z", "+00:00")),
+                timestamp=timestamp,
                 symbol=symbol,
                 exchange="coinbase",
-                bid=float(ticker["best_bid"]),
-                ask=float(ticker["best_ask"]),
-                last_price=float(ticker["price"]),
-                volume=float(ticker["volume_24h"]),
-                bid_size=float(ticker["best_bid_size"]),
-                ask_size=float(ticker["best_ask_size"]),
+                bid=float(best_bid),
+                ask=float(best_ask),
+                last_price=float(ticker.price),
+                volume=float(ticker.volume_24h),
+                bid_size=float(best_bid_size),
+                ask_size=float(best_ask_size),
                 trades_count=0,  # Coinbase doesn't provide this in ticker
                 vwap=None,  # Coinbase doesn't provide this in ticker
                 high=None,  # Coinbase doesn't provide this in ticker
                 low=None,  # Coinbase doesn't provide this in ticker
                 open=None,  # Coinbase doesn't provide this in ticker
-                close=float(ticker["price"]),
+                close=float(ticker.price),
             )
         except Exception as e:
             logger.error(f"Coinbase API error: {e}")
