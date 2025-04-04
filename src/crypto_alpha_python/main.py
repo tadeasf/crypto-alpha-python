@@ -66,7 +66,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 async def startup_event():
     """Initialize services on startup."""
     # Start market data collection for default symbols
-    default_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    default_symbols = ["BTCUSDT", "ETHUSDT"]
     try:
         async for session in get_session():
             try:

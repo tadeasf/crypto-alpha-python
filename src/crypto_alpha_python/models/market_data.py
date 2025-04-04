@@ -4,11 +4,16 @@ Market data models for storing exchange data.
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Field, SQLModel
+from sqlalchemy import DateTime, func
 
 class MarketDataBase(SQLModel):
     """Base model for market data."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    timestamp: datetime = Field(index=True)
+    timestamp: datetime = Field(
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs={"server_default": func.now()},
+        index=True
+    )
     symbol: str = Field(index=True)
     exchange: str = Field(index=True)
     bid: float

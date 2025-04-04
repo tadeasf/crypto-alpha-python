@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set
 import websockets
 from binance.spot import Spot
-from binance.websocket.spot.websocket_api import SpotWebsocketAPIClient
 from binance.websocket.spot.websocket_stream import SpotWebsocketStreamClient
 from coinbase.rest import RESTClient as CoinbaseClient
 import time
@@ -138,7 +137,7 @@ class ExchangeService:
                 
                 # Start the WebSocket client
                 logger.info("Starting Binance WebSocket client...")
-                self.binance_ws_client.start()
+                self.binance_ws_client.start_ws()
                 logger.info("Binance WebSocket client started")
         except Exception as e:
             logger.error(f"Failed to connect to Binance WebSocket for {symbol}: {e}")
@@ -161,6 +160,12 @@ class ExchangeService:
                     bid_size=float(data['B']),  # Best bid size
                     ask_size=float(data['A']),  # Best ask size
                     timestamp=datetime.fromtimestamp(data['E'] / 1000),
+                    trades_count=0,  # Not provided in mini ticker
+                    vwap=None,  # Not provided in mini ticker
+                    high=float(data.get('h', 0)),  # High price
+                    low=float(data.get('l', 0)),  # Low price
+                    open=float(data.get('o', 0)),  # Open price
+                    close=float(data['c'])  # Close price (same as last price)
                 )
                 # Store market data in database using a new session
                 from crypto_alpha_python.services.market_data import create_market_data
@@ -243,31 +248,55 @@ class ExchangeService:
                 for event in msg["events"]:
                     if event.get("type") == "snapshot" and "tickers" in event:
                         for ticker in event["tickers"]:
-                            # Convert symbol format (e.g., BTC-USD -> BTCUSDT)
-                            product_id = ticker['product_id']
-                            base, quote = product_id.split('-')
-                            symbol = f"{base}{quote}"  # No need to add USDT again
-                            
-                            # Parse timestamp and ensure it's timezone-aware
-                            timestamp = datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00"))
-                            
-                            market_data = MarketData(
-                                exchange="coinbase",
-                                symbol=symbol,
-                                last_price=float(ticker["price"]),
-                                volume=float(ticker["volume_24_h"]),
-                                bid=float(ticker["best_bid"]),
-                                ask=float(ticker["best_ask"]),
-                                bid_size=float(ticker["best_bid_quantity"]),
-                                ask_size=float(ticker["best_ask_quantity"]),
-                                timestamp=timestamp,
-                            )
-                            # Store market data in database using a new session
-                            from crypto_alpha_python.services.market_data import create_market_data
-                            from crypto_alpha_python.db.session import get_session
-                            async for session in get_session():
-                                await create_market_data(session, market_data)
-                            logger.info(f"Successfully stored Coinbase market data for {market_data.symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
+                            try:
+                                # Convert symbol format (e.g., BTC-USD -> BTCUSDT)
+                                product_id = ticker['product_id']
+                                base, quote = product_id.split('-')
+                                symbol = f"{base}{quote}"  # No need to add USDT again
+                                
+                                # Parse timestamp and ensure it's timezone-aware
+                                timestamp_str = msg.get("timestamp")
+                                if not timestamp_str:
+                                    logger.warning("No timestamp in Coinbase message")
+                                    continue
+                                    
+                                # Convert ISO format timestamp to datetime
+                                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                                
+                                # Create market data with proper type conversion
+                                market_data = MarketData(
+                                    exchange="coinbase",
+                                    symbol=symbol,
+                                    last_price=float(ticker["price"]),
+                                    volume=float(ticker["volume_24_h"]),
+                                    bid=float(ticker["best_bid"]),
+                                    ask=float(ticker["best_ask"]),
+                                    bid_size=float(ticker["best_bid_quantity"]),
+                                    ask_size=float(ticker["best_ask_quantity"]),
+                                    timestamp=timestamp,
+                                    trades_count=0,  # Coinbase doesn't provide this
+                                    vwap=None,  # Coinbase doesn't provide this
+                                    high=float(ticker.get("high_24_h", 0)),
+                                    low=float(ticker.get("low_24_h", 0)),
+                                    open=None,  # Coinbase doesn't provide this
+                                    close=float(ticker["price"])  # Use current price as close
+                                )
+                                
+                                # Store market data in database using a new session
+                                from crypto_alpha_python.services.market_data import create_market_data
+                                from crypto_alpha_python.db.session import get_session
+                                async for session in get_session():
+                                    await create_market_data(session, market_data)
+                                logger.info(f"Successfully stored Coinbase market data for {market_data.symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
+                            except KeyError as e:
+                                logger.error(f"Missing required field in Coinbase ticker data: {e}")
+                                continue
+                            except ValueError as e:
+                                logger.error(f"Error converting Coinbase data: {e}")
+                                continue
+                            except Exception as e:
+                                logger.error(f"Unexpected error processing Coinbase ticker: {e}")
+                                continue
             else:
                 logger.debug(f"Received non-ticker message from Coinbase: {msg}")
         except Exception as e:
