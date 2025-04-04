@@ -102,6 +102,15 @@ class ExchangeService:
             logger.error(f"Failed to generate JWT token: {e}")
             raise
     
+    def _format_symbol(self, symbol: str, exchange: str) -> str:
+        """Format symbol according to exchange requirements."""
+        if exchange == "coinbase":
+            # Convert BTCUSDT -> BTC-USD
+            base = symbol[:-4]  # Remove USDT
+            return f"{base}-USD"
+        else:  # binance
+            return symbol.lower()  # Binance uses lowercase
+
     async def connect_binance_websocket(
         self,
         symbol: str,
@@ -122,23 +131,23 @@ class ExchangeService:
                         asyncio.set_event_loop(loop)
                     loop.create_task(self._handle_binance_websocket_message(client, message))
 
+                def on_close(_):
+                    logger.info("Binance WebSocket connection closed")
+
                 self.binance_ws_client = SpotWebsocketStreamClient(
                     on_message=message_handler,
+                    on_close=on_close,
                     time_unit='millisecond'
                 )
                 logger.info("Binance WebSocket client initialized")
 
             if symbol not in self.subscribed_symbols:
-                logger.info(f"Subscribing to Binance WebSocket for {symbol}...")
+                formatted_symbol = self._format_symbol(symbol, "binance")
+                logger.info(f"Subscribing to Binance WebSocket for {formatted_symbol}...")
                 # Subscribe to mini ticker stream for real-time updates
-                self.binance_ws_client.mini_ticker(symbol=symbol.lower())
+                self.binance_ws_client.mini_ticker(symbol=formatted_symbol)
                 self.subscribed_symbols.add(symbol)
-                logger.info(f"Successfully subscribed to Binance WebSocket for {symbol}")
-                
-                # Start the WebSocket client
-                logger.info("Starting Binance WebSocket client...")
-                self.binance_ws_client.start_ws()
-                logger.info("Binance WebSocket client started")
+                logger.info(f"Successfully subscribed to Binance WebSocket for {formatted_symbol}")
         except Exception as e:
             logger.error(f"Failed to connect to Binance WebSocket for {symbol}: {e}")
             raise
@@ -191,7 +200,7 @@ class ExchangeService:
 
             if symbol not in self.ws_clients:
                 # Convert symbol format (e.g., BTCUSDT -> BTC-USD)
-                coinbase_symbol = f"{symbol[:-4]}-{symbol[-4:]}"
+                formatted_symbol = self._format_symbol(symbol, "coinbase")
                 
                 # Create WebSocket connection
                 ws_url = "wss://advanced-trade-ws.coinbase.com"
@@ -201,11 +210,11 @@ class ExchangeService:
                     # Generate JWT token
                     jwt_token = self._generate_jwt()
                     
-                    # Subscribe to ticker channel with proper message format
+                    # Subscribe to ticker_batch channel with proper message format
                     subscribe_message = {
                         "type": "subscribe",
-                        "product_ids": [coinbase_symbol],
-                        "channel": "ticker",
+                        "product_ids": [formatted_symbol],
+                        "channel": "ticker_batch",  # Using ticker_batch for better performance
                         "jwt": jwt_token
                     }
                     
@@ -218,7 +227,7 @@ class ExchangeService:
                     # Start message handler task
                     asyncio.create_task(self._handle_coinbase_messages(symbol, ws_client))
                     
-                    logger.info(f"Connected to Coinbase WebSocket for {symbol}")
+                    logger.info(f"Connected to Coinbase WebSocket for {formatted_symbol}")
                 except Exception as e:
                     await ws_client.close()
                     raise
@@ -244,7 +253,7 @@ class ExchangeService:
         """Handle Coinbase WebSocket message."""
         try:
             logger.debug(f"Received Coinbase WebSocket message: {msg}")
-            if msg.get("channel") == "ticker" and "events" in msg:
+            if msg.get("channel") == "ticker_batch" and "events" in msg:
                 for event in msg["events"]:
                     if event.get("type") == "snapshot" and "tickers" in event:
                         for ticker in event["tickers"]:
@@ -252,16 +261,16 @@ class ExchangeService:
                                 # Convert symbol format (e.g., BTC-USD -> BTCUSDT)
                                 product_id = ticker['product_id']
                                 base, quote = product_id.split('-')
-                                symbol = f"{base}{quote}"  # No need to add USDT again
+                                symbol = f"{base}{quote}"  # Convert back to our format
                                 
                                 # Parse timestamp and ensure it's timezone-aware
                                 timestamp_str = msg.get("timestamp")
                                 if not timestamp_str:
-                                    logger.warning("No timestamp in Coinbase message")
-                                    continue
-                                    
-                                # Convert ISO format timestamp to datetime
-                                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                                    logger.warning("No timestamp in Coinbase message, using current time")
+                                    timestamp = datetime.utcnow()
+                                else:
+                                    # Convert ISO format timestamp to datetime
+                                    timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
                                 
                                 # Create market data with proper type conversion
                                 market_data = MarketData(
@@ -269,10 +278,10 @@ class ExchangeService:
                                     symbol=symbol,
                                     last_price=float(ticker["price"]),
                                     volume=float(ticker["volume_24_h"]),
-                                    bid=float(ticker["best_bid"]),
-                                    ask=float(ticker["best_ask"]),
-                                    bid_size=float(ticker["best_bid_quantity"]),
-                                    ask_size=float(ticker["best_ask_quantity"]),
+                                    bid=float(ticker.get("best_bid", 0)),  # ticker_batch might not have these
+                                    ask=float(ticker.get("best_ask", 0)),  # ticker_batch might not have these
+                                    bid_size=float(ticker.get("best_bid_quantity", 0)),
+                                    ask_size=float(ticker.get("best_ask_quantity", 0)),
                                     timestamp=timestamp,
                                     trades_count=0,  # Coinbase doesn't provide this
                                     vwap=None,  # Coinbase doesn't provide this
@@ -388,7 +397,7 @@ class ExchangeService:
         try:
             # Close Binance WebSocket client
             if self.binance_ws_client:
-                self.binance_ws_client.stop()
+                self.binance_ws_client.stop()  # Use stop() instead of close()
                 self.binance_ws_client = None
                 logger.info("Binance WebSocket client stopped")
 
@@ -404,7 +413,7 @@ class ExchangeService:
                     unsubscribe_message = {
                         "type": "unsubscribe",
                         "product_ids": [f"{symbol[:-4]}-{symbol[-4:]}"],
-                        "channel": "ticker",
+                        "channel": "ticker_batch",
                         "jwt": jwt_token
                     }
                     
