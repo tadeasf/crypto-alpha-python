@@ -7,6 +7,7 @@ from sqlmodel import Field, SQLModel
 
 class MarketDataBase(SQLModel):
     """Base model for market data."""
+    id: Optional[int] = Field(default=None, primary_key=True)
     timestamp: datetime = Field(index=True)
     symbol: str = Field(index=True)
     exchange: str = Field(index=True)
@@ -33,4 +34,4 @@ class MarketDataCreate(MarketDataBase):
 
 class MarketDataRead(MarketDataBase):
     """Market data model for reading."""
-    id: int = Field(default=None, primary_key=True) 
+    pass 

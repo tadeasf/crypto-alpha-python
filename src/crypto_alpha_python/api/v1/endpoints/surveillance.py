@@ -7,17 +7,22 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from crypto_alpha_python.db.session import get_session
 from crypto_alpha_python.services.surveillance import MarketSurveillance
+from crypto_alpha_python.models.surveillance import (
+    VolumeSpikeResponse,
+    PriceJumpResponse,
+    WashTradingResponse,
+)
 
 router = APIRouter()
 
-@router.get("/volume-spike/{symbol}")
+@router.get("/volume-spike/{symbol}", response_model=VolumeSpikeResponse)
 async def detect_volume_spike(
     symbol: str,
     threshold: float = Query(3.0, gt=0),
     window: str = Query("1h", regex="^\d+[smhd]$"),
     exchange: str | None = None,
     session: AsyncSession = Depends(get_session),
-) -> Dict[str, any]:
+) -> VolumeSpikeResponse:
     """
     Detect volume spikes in market data.
     """
@@ -29,14 +34,14 @@ async def detect_volume_spike(
         exchange=exchange,
     )
 
-@router.get("/price-jump/{symbol}")
+@router.get("/price-jump/{symbol}", response_model=PriceJumpResponse)
 async def detect_price_jump(
     symbol: str,
     threshold: float = Query(0.02, gt=0),
     window: str = Query("1h", regex="^\d+[smhd]$"),
     exchange: str | None = None,
     session: AsyncSession = Depends(get_session),
-) -> Dict[str, any]:
+) -> PriceJumpResponse:
     """
     Detect significant price jumps.
     """
@@ -48,13 +53,13 @@ async def detect_price_jump(
         exchange=exchange,
     )
 
-@router.get("/wash-trading/{symbol}")
+@router.get("/wash-trading/{symbol}", response_model=WashTradingResponse)
 async def detect_wash_trading(
     symbol: str,
     window: str = Query("1h", regex="^\d+[smhd]$"),
     exchange: str | None = None,
     session: AsyncSession = Depends(get_session),
-) -> Dict[str, any]:
+) -> WashTradingResponse:
     """
     Detect potential wash trading patterns.
     """
