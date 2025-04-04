@@ -10,12 +10,6 @@
 #   universal: false
 
 -e file:.
-aiohappyeyeballs==2.6.1
-    # via aiohttp
-aiohttp==3.11.16
-    # via python-binance
-aiosignal==1.3.2
-    # via aiohttp
 alembic==1.15.2
     # via crypto-alpha-python
 annotated-types==0.7.0
@@ -26,13 +20,14 @@ anyio==4.9.0
 asyncpg==0.30.0
     # via crypto-alpha-python
 attrs==25.3.0
-    # via aiohttp
     # via cattrs
     # via lsprotocol
 backoff==2.2.1
     # via coinbase-advanced-py
 bcrypt==4.3.0
     # via passlib
+binance-connector==3.12.0
+    # via crypto-alpha-python
 black==25.1.0
 cattrs==24.1.3
     # via lsprotocol
@@ -55,15 +50,10 @@ coverage==7.8.0
 cryptography==44.0.2
     # via coinbase-advanced-py
     # via python-jose
-dateparser==1.2.1
-    # via python-binance
 ecdsa==0.19.1
     # via python-jose
 fastapi==0.115.12
     # via crypto-alpha-python
-frozenlist==1.5.0
-    # via aiohttp
-    # via aiosignal
 greenlet==3.1.1
     # via crypto-alpha-python
     # via sqlalchemy
@@ -78,7 +68,6 @@ idna==3.10
     # via anyio
     # via httpx
     # via requests
-    # via yarl
 iniconfig==2.1.0
     # via pytest
 isort==6.0.1
@@ -89,9 +78,6 @@ mako==1.3.9
     # via alembic
 markupsafe==3.0.2
     # via mako
-multidict==6.3.2
-    # via aiohttp
-    # via yarl
 mypy==1.15.0
 mypy-extensions==1.0.0
     # via black
@@ -115,9 +101,6 @@ pluggy==1.5.0
     # via pytest
 prometheus-client==0.21.1
     # via crypto-alpha-python
-propcache==0.3.1
-    # via aiohttp
-    # via yarl
 psycopg2-binary==2.9.10
     # via crypto-alpha-python
 pyasn1==0.4.8
@@ -126,7 +109,7 @@ pyasn1==0.4.8
 pycparser==2.22
     # via cffi
 pycryptodome==3.22.0
-    # via python-binance
+    # via binance-connector
 pydantic==2.11.1
     # via crypto-alpha-python
     # via fastapi
@@ -145,10 +128,7 @@ pytest==8.3.5
     # via pytest-cov
 pytest-asyncio==0.26.0
 pytest-cov==6.1.0
-python-binance==1.0.28
-    # via crypto-alpha-python
 python-dateutil==2.9.0.post0
-    # via dateparser
     # via pandas
 python-dotenv==1.1.0
     # via crypto-alpha-python
@@ -158,15 +138,12 @@ python-jose==3.4.0
 python-multipart==0.0.20
     # via crypto-alpha-python
 pytz==2025.2
-    # via dateparser
     # via pandas
 redis==5.2.1
     # via crypto-alpha-python
-regex==2024.11.6
-    # via dateparser
 requests==2.32.3
+    # via binance-connector
     # via coinbase-advanced-py
-    # via python-binance
 rsa==4.9
     # via python-jose
 ruff==0.11.2
@@ -174,7 +151,6 @@ ruff==0.11.2
 ruff-lsp==0.0.62
 six==1.17.0
     # via ecdsa
-    # via python-binance
     # via python-dateutil
 sniffio==1.3.1
     # via anyio
@@ -200,15 +176,12 @@ typing-inspection==0.4.0
     # via pydantic
 tzdata==2025.2
     # via pandas
-tzlocal==5.3.1
-    # via dateparser
 urllib3==2.3.0
     # via requests
 uvicorn==0.34.0
     # via crypto-alpha-python
+websocket-client==1.8.0
+    # via binance-connector
 websockets==13.1
     # via coinbase-advanced-py
     # via crypto-alpha-python
-    # via python-binance
-yarl==1.18.3
-    # via aiohttp

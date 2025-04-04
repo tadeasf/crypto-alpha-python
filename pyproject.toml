@@ -11,9 +11,8 @@ dependencies = [
     "uvicorn>=0.27.1",
     "sqlmodel>=0.0.16",
     "asyncpg>=0.29.0",
-    "greenlet>=3.0.3",
     "psycopg2-binary>=2.9.9",
-    "python-binance>=1.0.19",
+    "binance-connector>=3.12.0",
     "coinbase-advanced-py>=0.3.0",
     "websockets>=12.0",
     "redis>=5.0.1",
@@ -29,6 +28,7 @@ dependencies = [
     "alembic>=1.13.1",
     "httpx>=0.26.0",
     "tenacity>=8.2.3",
+    "greenlet==3.1.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"

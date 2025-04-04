@@ -3,12 +3,13 @@ Market data endpoints for handling market data operations.
 """
 from datetime import datetime, timedelta
 from typing import List
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from crypto_alpha_python.db.session import get_session
 from crypto_alpha_python.models.market_data import MarketData, MarketDataRead
 from crypto_alpha_python.services.market_data import get_market_data
+from crypto_alpha_python.core.tasks import task_manager
 
 router = APIRouter()
 
@@ -76,4 +77,49 @@ async def get_spreads(
         "symbol": symbol,
         "window": window,
         "spreads": spreads,
-    } 
+    }
+
+@router.post("/collect/{symbol}")
+async def start_collection(
+    symbol: str,
+    exchange: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Start collecting market data for a symbol.
+    """
+    try:
+        await task_manager.start_collection(
+            session=session,
+            symbols=[symbol],
+            exchanges=[exchange] if exchange else None,
+        )
+        return {
+            "message": f"Started collecting market data for {symbol}",
+            "symbol": symbol,
+            "exchange": exchange,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start collection: {str(e)}",
+        )
+
+@router.delete("/collect/{symbol}")
+async def stop_collection(
+    symbol: str,
+) -> dict:
+    """
+    Stop collecting market data for a symbol.
+    """
+    try:
+        await task_manager.stop_collection()
+        return {
+            "message": f"Stopped collecting market data for {symbol}",
+            "symbol": symbol,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to stop collection: {str(e)}",
+        ) 

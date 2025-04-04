@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     COINBASE_API_KEY: str | None = None
     COINBASE_API_SECRET: str | None = None
     
+    @field_validator("COINBASE_API_KEY", "COINBASE_API_SECRET")
+    @classmethod
+    def validate_coinbase_keys(cls, v: str | None) -> str | None:
+        if v is not None:
+            # Remove any whitespace and newlines
+            v = v.strip()
+            # Check if the key is empty after stripping
+            if not v:
+                return None
+        return v
+    
     # JWT Configuration
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
@@ -54,7 +65,8 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        env_file=".env"
+        env_file=".env",
+        extra='allow'
     )
 
 settings = Settings() 

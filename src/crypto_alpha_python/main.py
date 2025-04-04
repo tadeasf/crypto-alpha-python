@@ -1,13 +1,17 @@
 """
 Main application entry point for the Crypto Market Alpha Engine.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from crypto_alpha_python.api.v1.api import api_router
 from crypto_alpha_python.core.config import settings
-from crypto_alpha_python.core.logging import setup_logging
+from crypto_alpha_python.core.logging import setup_logging, logger
+from crypto_alpha_python.core.tasks import task_manager
+from crypto_alpha_python.db.session import get_session
+
 
 # Setup logging
 setup_logging()
@@ -57,6 +61,30 @@ app.mount("/metrics", metrics_app)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    # Start market data collection for default symbols
+    default_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    try:
+        async for session in get_session():
+            try:
+                await task_manager.start_collection(
+                    session=session,
+                    symbols=default_symbols,
+                )
+            except Exception as e:
+                logger.error(f"Error starting market data collection: {e}")
+                raise
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    await task_manager.stop_collection()
 
 @app.get("/")
 async def root():

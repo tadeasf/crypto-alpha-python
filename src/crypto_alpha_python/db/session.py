@@ -6,8 +6,11 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy.orm import sessionmaker
+import logging
 
 from crypto_alpha_python.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Create async engine
 engine = create_async_engine(
