@@ -87,13 +87,16 @@ class ExchangeService:
             
             # Convert the API secret to bytes if it's not already
             if isinstance(api_secret, str):
+                # Remove any whitespace and newlines
+                api_secret = api_secret.strip()
+                # Convert to bytes
                 api_secret = api_secret.encode('utf-8')
             
-            # Use HS256 instead of ES256 for better compatibility
+            # Use ES256 algorithm as required by Coinbase
             return jwt.encode(
                 payload,
                 api_secret,
-                algorithm="HS256",
+                algorithm="ES256",
                 headers=headers
             )
         except Exception as e:
@@ -133,10 +136,10 @@ class ExchangeService:
                 self.subscribed_symbols.add(symbol)
                 logger.info(f"Successfully subscribed to Binance WebSocket for {symbol}")
                 
-                # Connect the WebSocket client
-                logger.info("Connecting Binance WebSocket client...")
-                self.binance_ws_client.connect()
-                logger.info("Binance WebSocket client connected")
+                # Start the WebSocket client
+                logger.info("Starting Binance WebSocket client...")
+                self.binance_ws_client.start()
+                logger.info("Binance WebSocket client started")
         except Exception as e:
             logger.error(f"Failed to connect to Binance WebSocket for {symbol}: {e}")
             raise
@@ -193,7 +196,7 @@ class ExchangeService:
                     # Generate JWT token
                     jwt_token = self._generate_jwt()
                     
-                    # Subscribe to ticker channel
+                    # Subscribe to ticker channel with proper message format
                     subscribe_message = {
                         "type": "subscribe",
                         "product_ids": [coinbase_symbol],
@@ -236,27 +239,35 @@ class ExchangeService:
         """Handle Coinbase WebSocket message."""
         try:
             logger.debug(f"Received Coinbase WebSocket message: {msg}")
-            if msg.get("type") == "ticker":
-                # Convert symbol format (e.g., BTC-USD -> BTCUSDT)
-                symbol = f"{msg['product_id'].replace('-', '')}USDT"
-                
-                market_data = MarketData(
-                    exchange="coinbase",
-                    symbol=symbol,
-                    last_price=float(msg["price"]),
-                    volume=float(msg["volume_24h"]),
-                    bid=float(msg["best_bid"]),
-                    ask=float(msg["best_ask"]),
-                    bid_size=float(msg["best_bid_size"]),
-                    ask_size=float(msg["best_ask_size"]),
-                    timestamp=datetime.fromtimestamp(time.time()),
-                )
-                # Store market data in database using a new session
-                from crypto_alpha_python.services.market_data import create_market_data
-                from crypto_alpha_python.db.session import get_session
-                async for session in get_session():
-                    await create_market_data(session, market_data)
-                logger.info(f"Successfully stored Coinbase market data for {market_data.symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
+            if msg.get("channel") == "ticker" and "events" in msg:
+                for event in msg["events"]:
+                    if event.get("type") == "snapshot" and "tickers" in event:
+                        for ticker in event["tickers"]:
+                            # Convert symbol format (e.g., BTC-USD -> BTCUSDT)
+                            product_id = ticker['product_id']
+                            base, quote = product_id.split('-')
+                            symbol = f"{base}{quote}"  # No need to add USDT again
+                            
+                            # Parse timestamp and ensure it's timezone-aware
+                            timestamp = datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00"))
+                            
+                            market_data = MarketData(
+                                exchange="coinbase",
+                                symbol=symbol,
+                                last_price=float(ticker["price"]),
+                                volume=float(ticker["volume_24_h"]),
+                                bid=float(ticker["best_bid"]),
+                                ask=float(ticker["best_ask"]),
+                                bid_size=float(ticker["best_bid_quantity"]),
+                                ask_size=float(ticker["best_ask_quantity"]),
+                                timestamp=timestamp,
+                            )
+                            # Store market data in database using a new session
+                            from crypto_alpha_python.services.market_data import create_market_data
+                            from crypto_alpha_python.db.session import get_session
+                            async for session in get_session():
+                                await create_market_data(session, market_data)
+                            logger.info(f"Successfully stored Coinbase market data for {market_data.symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
             else:
                 logger.debug(f"Received non-ticker message from Coinbase: {msg}")
         except Exception as e:
@@ -348,19 +359,36 @@ class ExchangeService:
         try:
             # Close Binance WebSocket client
             if self.binance_ws_client:
-                self.binance_ws_client.close()
+                self.binance_ws_client.stop()
                 self.binance_ws_client = None
                 logger.info("Binance WebSocket client stopped")
 
             # Close Coinbase WebSocket connections
-            for symbol, ws in self.websocket_connections.items():
+            # Create a copy of the items to avoid dictionary size change during iteration
+            ws_clients_copy = list(self.ws_clients.items())
+            for symbol, ws in ws_clients_copy:
                 try:
+                    # Generate JWT token for unsubscribe
+                    jwt_token = self._generate_jwt()
+                    
+                    # Unsubscribe message
+                    unsubscribe_message = {
+                        "type": "unsubscribe",
+                        "product_ids": [f"{symbol[:-4]}-{symbol[-4:]}"],
+                        "channel": "ticker",
+                        "jwt": jwt_token
+                    }
+                    
+                    # Send unsubscribe message
+                    await ws.send(json.dumps(unsubscribe_message))
+                    
+                    # Close the connection
                     await ws.close()
                     logger.info(f"Closed Coinbase WebSocket connection for {symbol}")
                 except Exception as e:
                     logger.error(f"Error closing Coinbase WebSocket for {symbol}: {e}")
             
-            self.websocket_connections.clear()
+            self.ws_clients.clear()
             self.subscribed_symbols.clear()
             logger.info("All WebSocket connections closed")
         except Exception as e:
