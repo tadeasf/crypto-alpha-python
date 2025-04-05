@@ -11,6 +11,7 @@ import logging
 
 from crypto_alpha_python.models.market_data import MarketData
 from crypto_alpha_python.services.market_data import get_market_data
+from crypto_alpha_python.services.redis import redis_service
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,19 @@ async def calculate_volatility(
             start_time = end_time - timedelta(days=1)
             logger.debug("Using default 1-day window for volatility calculation")
     
+    # Generate cache key
+    cache_key = redis_service.generate_key(
+        prefix="volatility",
+        symbol=symbol,
+        window=window or f"{start_time.isoformat()}_{end_time.isoformat()}",
+        exchange=exchange
+    )
+    
+    # Try to get from cache first
+    cached_volatility = await redis_service.get(cache_key)
+    if cached_volatility is not None:
+        return float(cached_volatility)
+    
     data = await get_market_data(
         session=session,
         symbol=symbol,
@@ -112,6 +126,14 @@ async def calculate_volatility(
     volatility = np.std(returns) * annualization_factor
     
     logger.debug(f"Calculated volatility for {symbol}: {volatility:.6f}")
+    
+    # Cache the result for 5 minutes
+    await redis_service.set(
+        cache_key,
+        float(volatility),
+        expire_seconds=300
+    )
+    
     return float(volatility)
 
 async def calculate_order_book_imbalance(
@@ -185,6 +207,19 @@ async def calculate_twap(
             start_time = end_time - timedelta(days=1)
             logger.debug("Using default 1-day window for TWAP calculation")
     
+    # Generate cache key
+    cache_key = redis_service.generate_key(
+        prefix="twap",
+        symbol=symbol,
+        window=window or f"{start_time.isoformat()}_{end_time.isoformat()}",
+        exchange=exchange
+    )
+    
+    # Try to get from cache first
+    cached_twap = await redis_service.get(cache_key)
+    if cached_twap is not None:
+        return float(cached_twap)
+    
     data = await get_market_data(
         session=session,
         symbol=symbol,
@@ -211,5 +246,12 @@ async def calculate_twap(
         else:
             twap = sum(d.last_price * d.volume for d in data) / total_volume
             logger.debug(f"Calculated volume-weighted TWAP for {symbol}: {twap:.8f}")
+    
+    # Cache the result for 5 minutes
+    await redis_service.set(
+        cache_key,
+        float(twap),
+        expire_seconds=300
+    )
     
     return float(twap) 

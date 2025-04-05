@@ -19,6 +19,7 @@ from crypto_alpha_python.models.surveillance import (
     SuspiciousPeriod,
 )
 from crypto_alpha_python.services.market_data import get_market_data
+from crypto_alpha_python.services.redis import redis_service
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,20 @@ class MarketSurveillance:
                 message=f"Invalid window format: {e}",
             )
         
+        # Generate cache key
+        cache_key = redis_service.generate_key(
+            prefix="volume_spike",
+            symbol=symbol,
+            window=window,
+            exchange=exchange,
+            threshold=threshold
+        )
+        
+        # Try to get from cache first
+        cached_response = await redis_service.get(cache_key)
+        if cached_response:
+            return VolumeSpikeResponse(**cached_response)
+        
         end_time = datetime.utcnow()
         start_time = end_time - delta
         
@@ -165,6 +180,13 @@ class MarketSurveillance:
             result.message = "No volume spikes detected"
             logger.debug(f"No volume spikes detected for {symbol}")
         
+        # Cache the result for 5 minutes
+        await redis_service.set(
+            cache_key,
+            result.dict(),
+            expire_seconds=300
+        )
+        
         return result
     
     async def detect_price_jump(
@@ -198,6 +220,20 @@ class MarketSurveillance:
                 detected=False,
                 message=f"Invalid window format: {e}",
             )
+        
+        # Generate cache key
+        cache_key = redis_service.generate_key(
+            prefix="price_jump",
+            symbol=symbol,
+            window=window,
+            exchange=exchange,
+            threshold=threshold
+        )
+        
+        # Try to get from cache first
+        cached_response = await redis_service.get(cache_key)
+        if cached_response:
+            return PriceJumpResponse(**cached_response)
         
         end_time = datetime.utcnow()
         start_time = end_time - delta
@@ -251,6 +287,13 @@ class MarketSurveillance:
             result.message = "No significant price jumps detected"
             logger.debug(f"No price jumps detected for {symbol}")
         
+        # Cache the result for 5 minutes
+        await redis_service.set(
+            cache_key,
+            result.dict(),
+            expire_seconds=300
+        )
+        
         return result
     
     async def detect_wash_trading(
@@ -281,6 +324,19 @@ class MarketSurveillance:
                 detected=False,
                 message=f"Invalid window format: {e}",
             )
+        
+        # Generate cache key
+        cache_key = redis_service.generate_key(
+            prefix="wash_trading",
+            symbol=symbol,
+            window=window,
+            exchange=exchange
+        )
+        
+        # Try to get from cache first
+        cached_response = await redis_service.get(cache_key)
+        if cached_response:
+            return WashTradingResponse(**cached_response)
         
         end_time = datetime.utcnow()
         start_time = end_time - delta
@@ -343,5 +399,12 @@ class MarketSurveillance:
         else:
             result.message = "No suspicious wash trading patterns detected"
             logger.debug(f"No wash trading patterns detected for {symbol}")
+        
+        # Cache the result for 5 minutes
+        await redis_service.set(
+            cache_key,
+            result.dict(),
+            expire_seconds=300
+        )
         
         return result 

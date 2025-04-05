@@ -9,6 +9,7 @@ A high-performance crypto market data processing and analysis system built with 
 - WebSocket streaming for live price updates
 - Historical data storage with TimescaleDB
 - Configurable data collection intervals
+- Protected default symbols (BTCUSDT, ETHUSDT)
 
 ### Market Analysis
 - Volatility calculation with configurable time windows
@@ -16,15 +17,6 @@ A high-performance crypto market data processing and analysis system built with 
 - Time-Weighted Average Price (TWAP) calculation
 - Bid-ask spread analysis
 - Volume profile analysis
-
-### Portfolio Management
-- Portfolio value tracking
-- Position management
-- Order execution and tracking
-- Performance metrics:
-  - Value at Risk (VaR) calculation
-  - Sharpe ratio analysis
-  - Portfolio returns tracking
 
 ### Market Surveillance
 - Volume spike detection using z-scores
@@ -51,24 +43,20 @@ A high-performance crypto market data processing and analysis system built with 
 
 ### Analysis
 - `GET /api/v1/analysis/volatility/{symbol}` - Get volatility analysis
-- `GET /api/v1/analysis/correlation` - Get correlation between symbols
 - `GET /api/v1/analysis/orderbook-imbalance/{symbol}` - Get order book imbalance
-
-### Portfolio
-- `GET /api/v1/portfolio/value/{user_id}` - Get portfolio value
-- `GET /api/v1/portfolio/var/{user_id}` - Get Value at Risk
-- `GET /api/v1/portfolio/sharpe/{user_id}` - Get Sharpe ratio
+- `GET /api/v1/analysis/twap/{symbol}` - Get Time-Weighted Average Price
 
 ### Surveillance
-- `GET /api/v1/surveillance/volume-spikes` - Get detected volume spikes
-- `GET /api/v1/surveillance/price-anomalies` - Get detected price anomalies
+- `GET /api/v1/surveillance/volume-spike/{symbol}` - Detect volume spikes
+- `GET /api/v1/surveillance/price-jump/{symbol}` - Detect price jumps
+- `GET /api/v1/surveillance/wash-trading/{symbol}` - Detect wash trading patterns
 
 ### WebSocket
 - `WS /ws/market-data/{symbol}` - Real-time market data stream
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.11+
 - Docker and Docker Compose
 - Exchange API keys (Binance, Coinbase)
 - TimescaleDB
