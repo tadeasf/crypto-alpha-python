@@ -73,6 +73,7 @@ async def startup_event():
                 await task_manager.start_collection(
                     session=session,
                     symbols=default_symbols,
+                    is_default=True,  # Mark as default/protected symbols
                 )
             except Exception as e:
                 logger.error(f"Error starting market data collection: {e}")

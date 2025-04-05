@@ -43,30 +43,28 @@ A high-performance crypto market data processing and analysis system built with 
 ## API Endpoints
 
 ### Market Data
-- `GET /api/v1/market-data/{symbol}` - Get historical market data
-- `GET /api/v1/market-data/spreads/{symbol}` - Get bid-ask spreads
-- `WS /api/v1/ws/market-data/{symbol}` - WebSocket stream for real-time data
+- `GET /api/v1/market-data/{symbol}` - Get market data for a symbol
+- `POST /api/v1/market-data/collect/{symbol}` - Start collecting market data
+- `DELETE /api/v1/market-data/collect/{symbol}` - Stop collecting market data
+- `GET /api/v1/market-data/available-symbols` - Get available symbols
+- `GET /api/v1/market-data/collect/symbols` - Get current collection symbols
 
 ### Analysis
-- `GET /api/v1/analysis/volatility/{symbol}` - Calculate volatility
+- `GET /api/v1/analysis/volatility/{symbol}` - Get volatility analysis
+- `GET /api/v1/analysis/correlation` - Get correlation between symbols
 - `GET /api/v1/analysis/orderbook-imbalance/{symbol}` - Get order book imbalance
-- `GET /api/v1/analysis/twap/{symbol}` - Calculate TWAP
 
 ### Portfolio
 - `GET /api/v1/portfolio/value/{user_id}` - Get portfolio value
-- `GET /api/v1/portfolio/var/{user_id}` - Calculate Value at Risk
-- `GET /api/v1/portfolio/sharpe/{user_id}` - Calculate Sharpe ratio
-
-### Orders
-- `POST /api/v1/orders/` - Create new order
-- `GET /api/v1/orders/{order_id}` - Get order details
-- `GET /api/v1/orders/user/{user_id}` - Get user's orders
-- `PATCH /api/v1/orders/{order_id}/status` - Update order status
+- `GET /api/v1/portfolio/var/{user_id}` - Get Value at Risk
+- `GET /api/v1/portfolio/sharpe/{user_id}` - Get Sharpe ratio
 
 ### Surveillance
-- `GET /api/v1/surveillance/volume-spike/{symbol}` - Detect volume spikes
-- `GET /api/v1/surveillance/price-jump/{symbol}` - Detect price jumps
-- `GET /api/v1/surveillance/wash-trading/{symbol}` - Detect wash trading
+- `GET /api/v1/surveillance/volume-spikes` - Get detected volume spikes
+- `GET /api/v1/surveillance/price-anomalies` - Get detected price anomalies
+
+### WebSocket
+- `WS /ws/market-data/{symbol}` - Real-time market data stream
 
 ## Prerequisites
 

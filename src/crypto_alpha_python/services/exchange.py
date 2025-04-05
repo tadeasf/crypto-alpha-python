@@ -13,6 +13,7 @@ import uuid
 import jwt
 import json
 import logging
+import aiohttp
 
 from crypto_alpha_python.core.config import settings
 from crypto_alpha_python.models.market_data import MarketData
@@ -41,6 +42,13 @@ class ExchangeService:
                 logger.info("Binance client initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Binance client: {e}")
+        else:
+            # If API keys are not available, initialize with just the base URL for public endpoints
+            try:
+                self.binance_client = Spot()
+                logger.info("Binance client initialized for public endpoints only")
+            except Exception as e:
+                logger.error(f"Failed to initialize Binance client: {e}")
         
         # Initialize Coinbase client if API keys are available
         if settings.COINBASE_API_KEY and settings.COINBASE_API_SECRET:
@@ -62,7 +70,7 @@ class ExchangeService:
                 logger.error(f"Failed to initialize Coinbase client: {e}")
                 logger.error("Please ensure your Coinbase API keys are properly formatted and valid")
         else:
-            logger.warning("Coinbase API credentials not configured, skipping Coinbase client initialization")
+            logger.warning("Coinbase API credentials not configured, some functionality may be limited")
     
     def _generate_jwt(self) -> str:
         """Generate JWT token for Coinbase WebSocket authentication."""
@@ -102,14 +110,40 @@ class ExchangeService:
             logger.error(f"Failed to generate JWT token: {e}")
             raise
     
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Normalize symbol to standard format."""
+        # Ensure symbol ends with USDT if it doesn't have a quote currency
+        if not (symbol.endswith('USDT') or symbol.endswith('USD')):
+            return f"{symbol}USDT"
+        return symbol
+    
     def _format_symbol(self, symbol: str, exchange: str) -> str:
         """Format symbol according to exchange requirements."""
         if exchange == "coinbase":
             # Convert BTCUSDT -> BTC-USD
-            base = symbol[:-4]  # Remove USDT
-            return f"{base}-USD"
+            if symbol.endswith('USDT'):
+                # Remove USDT suffix and add -USD
+                base = symbol[:-4]
+                return f"{base}-USD"
+            elif symbol.endswith('USD'):
+                # Convert BTCUSD -> BTC-USD if not already in correct format
+                if '-' not in symbol:
+                    base = symbol[:-3]
+                    return f"{base}-USD"
+            return symbol  # Return as is if already properly formatted
         else:  # binance
-            return symbol.lower()  # Binance uses lowercase
+            # Binance expects symbols like BTCUSDT (no dash)
+            if '-' in symbol:
+                # Convert BTC-USD -> BTCUSDT
+                base, quote = symbol.split('-')
+                if quote == 'USD':
+                    return f"{base}USDT"
+                return f"{base}{quote}"
+            elif symbol.endswith('USD') and '-' not in symbol:
+                # Convert BTCUSD -> BTCUSDT
+                base = symbol[:-3]
+                return f"{base}USDT"
+            return symbol  # Return as is if already in correct format (BTCUSDT)
 
     async def connect_binance_websocket(
         self,
@@ -142,10 +176,13 @@ class ExchangeService:
                 logger.info("Binance WebSocket client initialized")
 
             if symbol not in self.subscribed_symbols:
-                formatted_symbol = self._format_symbol(symbol, "binance")
+                # Format symbol for Binance (e.g., BTCUSDT)
+                formatted_symbol = self._format_symbol(symbol, "binance").lower()
                 logger.info(f"Subscribing to Binance WebSocket for {formatted_symbol}...")
+                
                 # Subscribe to mini ticker stream for real-time updates
                 self.binance_ws_client.mini_ticker(symbol=formatted_symbol)
+                
                 self.subscribed_symbols.add(symbol)
                 logger.info(f"Successfully subscribed to Binance WebSocket for {formatted_symbol}")
         except Exception as e:
@@ -159,9 +196,16 @@ class ExchangeService:
             if 'data' in message:
                 data = message['data']
                 logger.debug(f"Processing Binance WebSocket data: {data}")
+                
+                # Convert Binance symbol format to our normalized format for display/storage
+                # e.g., 'btcusdt' -> 'BTCUSDT'
+                raw_symbol = data['s'].upper()
+                
+                # We store the market data with the normalized symbol 
+                # to ensure consistent database queries
                 market_data = MarketData(
                     exchange="binance",
-                    symbol=data['s'],
+                    symbol=raw_symbol,  # Use the original Binance format
                     last_price=float(data['c']),  # Current price
                     volume=float(data['v']),  # Volume
                     bid=float(data['b']),  # Best bid price
@@ -181,7 +225,7 @@ class ExchangeService:
                 from crypto_alpha_python.db.session import get_session
                 async for session in get_session():
                     await create_market_data(session, market_data)
-                logger.info(f"Successfully stored Binance market data for {market_data.symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
+                logger.info(f"Successfully stored Binance market data for {raw_symbol}: last_price={market_data.last_price}, volume={market_data.volume}")
             else:
                 logger.debug(f"Received non-data message from Binance: {message}")
         except Exception as e:
@@ -322,16 +366,23 @@ class ExchangeService:
             return None
         
         try:
+            # Format symbol for Binance API (e.g., BTCUSDT)
+            formatted_symbol = self._format_symbol(symbol, "binance")
+            logger.debug(f"Getting Binance ticker for {formatted_symbol}")
+            
             # Get ticker data using the correct method
-            ticker = self.binance_client.ticker_24hr(symbol=symbol)
+            ticker = self.binance_client.ticker_24hr(symbol=formatted_symbol)
             
             # Convert timestamp to datetime
             timestamp = datetime.fromtimestamp(ticker["closeTime"] / 1000)
             
+            # Store the symbol in the format expected in the database
+            stored_symbol = formatted_symbol
+            
             # Create market data object
             market_data = MarketData(
                 timestamp=timestamp,
-                symbol=symbol,
+                symbol=stored_symbol,
                 exchange="binance",
                 bid=float(ticker["bidPrice"]),
                 ask=float(ticker["askPrice"]),
@@ -364,38 +415,49 @@ class ExchangeService:
             return None
         
         try:
-            # Convert symbol format (e.g., BTCUSDT -> BTC-USD)
-            base, quote = symbol[:-4], symbol[-4:]
-            product_id = f"{base}-{quote}"
+            # Format symbol for Coinbase API
+            formatted_symbol = self._format_symbol(symbol, "coinbase")
+            logger.debug(f"Getting Coinbase ticker for {formatted_symbol}")
             
             # Get product ticker using Advanced Trade API
-            ticker = self.coinbase_client.get_product(product_id)
+            ticker = self.coinbase_client.get_product(formatted_symbol)
             
             # Get best bid/ask separately since it's not in the product response
-            best_bid_ask = self.coinbase_client.get_best_bid_ask(product_ids=[product_id])
+            best_bid_ask = self.coinbase_client.get_best_bid_ask(product_ids=[formatted_symbol])
             
             # Handle timestamp
             timestamp_str = ticker.time if hasattr(ticker, 'time') else None
             if not timestamp_str:
-                logger.warning("No timestamp in Coinbase ticker data, using current time")
+                logger.warning(f"No timestamp in Coinbase ticker data for {symbol}, using current time")
                 timestamp = datetime.now(UTC)
             else:
                 # Convert ISO format timestamp to datetime
                 timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             
+            # Store the original symbol format in our database for consistency
+            stored_symbol = symbol
+            
             # Get best bid/ask from the response
             # Find the pricebook for our product
-            pricebook = next((pb for pb in best_bid_ask.pricebooks if pb.product_id == product_id), None)
+            pricebook = next((pb for pb in best_bid_ask.pricebooks if pb.product_id == formatted_symbol), None)
             
-            # Get best bid/ask from the pricebook
-            best_bid = pricebook.bids[0].price if pricebook and pricebook.bids else 0
-            best_ask = pricebook.asks[0].price if pricebook and pricebook.asks else 0
-            best_bid_size = pricebook.bids[0].size if pricebook and pricebook.bids else 0
-            best_ask_size = pricebook.asks[0].size if pricebook and pricebook.asks else 0
+            if not pricebook or not hasattr(pricebook, 'bids') or not hasattr(pricebook, 'asks'):
+                logger.warning(f"No pricebook data for {formatted_symbol}")
+                # Default values if price book is missing
+                best_bid = 0
+                best_ask = 0
+                best_bid_size = 0
+                best_ask_size = 0
+            else:
+                # Get best bid/ask from the pricebook
+                best_bid = pricebook.bids[0].price if pricebook.bids else 0
+                best_ask = pricebook.asks[0].price if pricebook.asks else 0
+                best_bid_size = pricebook.bids[0].size if pricebook.bids else 0
+                best_ask_size = pricebook.asks[0].size if pricebook.asks else 0
             
             return MarketData(
                 timestamp=timestamp,
-                symbol=symbol,
+                symbol=stored_symbol,
                 exchange="coinbase",
                 bid=float(best_bid),
                 ask=float(best_ask),
@@ -411,9 +473,132 @@ class ExchangeService:
                 close=float(ticker.price),
             )
         except Exception as e:
-            logger.error(f"Coinbase API error: {e}")
+            logger.error(f"Coinbase API error for {symbol}: {e}")
             return None
     
+    async def validate_symbol(self, symbol: str) -> Dict[str, bool]:
+        """
+        Validate if a symbol exists on supported exchanges.
+        
+        Args:
+            symbol: The symbol to validate (e.g., 'BTCUSDT', 'BTC-USD')
+            
+        Returns:
+            A dictionary with exchange names as keys and boolean values indicating
+            if the symbol is valid on that exchange.
+        """
+        result = {
+            "binance": False,
+            "coinbase": False
+        }
+        
+        try:
+            # Validate on Binance
+            if self.binance_client:
+                try:
+                    # Format symbol for Binance
+                    binance_symbol = self._format_symbol(symbol, "binance")
+                    # Try to get exchange info for this symbol
+                    exchange_info = self.binance_client.exchange_info(symbol=binance_symbol)
+                    # If we get here without exception, symbol exists
+                    if exchange_info and "symbols" in exchange_info:
+                        for sym_info in exchange_info["symbols"]:
+                            if sym_info["symbol"] == binance_symbol:
+                                result["binance"] = True
+                                break
+                except Exception as e:
+                    logger.warning(f"Symbol {symbol} validation failed on Binance: {e}")
+            
+            # Validate on Coinbase
+            if self.coinbase_client:
+                try:
+                    # Format symbol for Coinbase
+                    coinbase_symbol = self._format_symbol(symbol, "coinbase")
+                    # Try to get product info
+                    try:
+                        product = self.coinbase_client.get_product(coinbase_symbol)
+                        if product and hasattr(product, 'product_id'):
+                            result["coinbase"] = True
+                    except Exception as e:
+                        if "product not found" not in str(e).lower():
+                            logger.warning(f"Error checking Coinbase product: {e}")
+                except Exception as e:
+                    logger.warning(f"Symbol {symbol} validation failed on Coinbase: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error validating symbol {symbol}: {e}")
+        
+        return result
+
+    async def get_available_symbols(self, limit: int = 20) -> Dict[str, List[str]]:
+        """
+        Get a list of available symbols from supported exchanges.
+        
+        Args:
+            limit: Maximum number of symbols to return per exchange
+            
+        Returns:
+            Dictionary with exchange names as keys and lists of symbols as values
+        """
+        result = {
+            "binance": [],
+            "coinbase": []
+        }
+        
+        try:
+            # Get Binance symbols
+            if self.binance_client:
+                try:
+                    # Get exchange info
+                    exchange_info = self.binance_client.exchange_info()
+                    if exchange_info and "symbols" in exchange_info:
+                        # Filter symbols to only include USDT pairs and status==TRADING
+                        usdt_symbols = [
+                            sym["symbol"] for sym in exchange_info["symbols"]
+                            if sym["quoteAsset"] == "USDT" and sym["status"] == "TRADING"
+                        ]
+                        # Sort by symbol name and take the top ones
+                        result["binance"] = sorted(usdt_symbols)[:limit]
+                except Exception as e:
+                    logger.error(f"Error getting Binance symbols: {e}")
+            
+            # Get Coinbase symbols using public API
+            try:
+                # Use the public API endpoint that doesn't require authentication
+                url = "https://api.coinbase.com/api/v3/brokerage/market/products"
+                params = {
+                    "limit": limit,
+                    "product_type": "SPOT"  # Focus on spot trading pairs
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if "products" in data:
+                                # Extract product IDs from the response
+                                coinbase_products = []
+                                for product in data.get("products", []):
+                                    if isinstance(product, dict) and "product_id" in product:
+                                        # Filter to include only USD pairs
+                                        product_id = product["product_id"]
+                                        if product_id.endswith("-USD"):
+                                            coinbase_products.append(product_id)
+                                            
+                                # Sort and take the top ones
+                                result["coinbase"] = sorted(coinbase_products)[:limit]
+                            else:
+                                logger.warning("No 'products' field in Coinbase API response")
+                        else:
+                            logger.warning(f"Failed to get Coinbase products: {response.status}")
+            except Exception as e:
+                logger.error(f"Error getting Coinbase symbols via public API: {e}")
+        
+        except Exception as e:
+            logger.error(f"Error getting available symbols: {e}")
+            
+        return result
+
     async def close_connections(self) -> None:
         """Close all WebSocket connections."""
         try:
